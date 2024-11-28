@@ -2,220 +2,107 @@
 #include <microDS3231.h> //https://github.com/GyverLibs/microDS3231?tab=readme-ov-file#usage
 #include <EEPROM.h>
 #include <Wire.h>
-#include "relay.h"
-#include "parser.h"
+#include "smart_home.hpp"
+#include "request_from_server.hpp"
 
-const uint8_t RELAY_MAX = 3;
 const uint8_t RELAY_0 = 6;
 const uint8_t RELAY_1 = 7;
 const uint8_t RELAY_2 = 8;
 const uint8_t MINUTES_IN_HOUR = 60;
-const uint8_t MAX_BUF = 40;    // Максимальная длина массива
-char dataArray[MAX_BUF];       // Объявляем массив для хранения данных запроса
-
-const char OK_slash_equals[] = "ok/=";
-const char OK_slash_slash[] = "ok//;";
-const char slash_slash[] = "//;";
-const char slash_s[] = "/;";
-const char slash[] = "/";
-const char ER1[] = "er/1//;";
-const char ER2[] = "er/2//;";
-const char ER3[] = "er/3//;";
+const uint8_t MAX_BUF    = 20;      // Максимальная длина массива
+uint8_t dataIn[MAX_BUF]  = {0};     // Объявляем массив для хранения данных запроса
+uint8_t dataOut[MAX_BUF] = {0};     // Объявляем массив для хранения данных ответа
+uint8_t byteCount = 0;              // Счетчик принятого байта
 
 MicroDS3231 rtc;
-DateTime date_time;
-Relay relay[] = {RELAY_0, RELAY_1, RELAY_2};
+SmartHome smart_home(RELAY_0, RELAY_1, RELAY_2);
 uint16_t minutes;
 
-void ShowTime();
 void clearEEPROM();
-bool ReadingBuffer();
+bool receiveBytesFromUART();
 void pinModeFast(uint8_t pin, uint8_t mode);
 void digitalWriteFast(uint8_t pin, bool x);
+void SmartHome_UART();
 
 void setup() {
     
     Serial.begin(9600);
 
-    //clearEEPROM(); // Затираем EEPROM перед началом работы
+    // clearEEPROM(); // Затираем EEPROM перед началом работы
 
     if (!rtc.begin()) {
-        Serial.println(ER1);
         delay(60000);
         asm volatile("jmp 0x00");
     }
 
-    // rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
+    //rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
     if (rtc.lostPower()) {            // выполнится при сбросе батарейки
-        Serial.println(ER2);
         rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
     }
 
-    date_time = rtc.getTime();
+    smart_home.SET_time(rtc.getTime());
     delay(10);
-    minutes = (uint16_t)date_time.hour * MINUTES_IN_HOUR + (uint16_t)date_time.minute;
+    minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
+
+    //EEPROM.put(0, smart_home); //
+    EEPROM.get(0, smart_home); //
     
-    for (uint8_t i = 0; i < RELAY_MAX; ++i) {
-        //EEPROM.put(i * sizeof(Relay), relay[i]); //
-        EEPROM.get(i * sizeof(Relay), relay[i]); //
-        uint8_t pin = relay[i].GET_pin();
-        //pinMode(pin, OUTPUT);
+    for (uint8_t i = 0; i < 3; ++i) {
+        uint8_t pin = smart_home.GET_pin(i);
         pinModeFast(pin, 1);
-        //digitalWrite(pin, relay[i].GET_status_relay());
-        digitalWriteFast(pin, (bool)relay[i].GET_status_relay());
+        digitalWriteFast(pin, (bool)smart_home.GET_status_relay(i));
     }
-    //Serial.println("Start UNO");
-    //ShowTime();
 }
 
 void loop() {
-    if (ReadingBuffer()) {
-        Parser pars(dataArray, MAX_BUF);
-        if (pars.GET_error()) {
-            Parser::Type type = pars.GET_type();
-            if (type == Parser::Type::PING) {
-                Serial.print(OK_slash_equals);                                  // запрос подключения
-                Serial.print(millis());
-                Serial.println(slash_slash);
-            } else if (type == Parser::Type::GET) {  
-                Parser::Type chapter = pars.GET_chapter();
-                if (chapter == Parser::Type::TIME) {        
-                    ShowTime();                                            // запрос времени
-                } else if (chapter == Parser::Type::RELAY) { 
-                    Parser::Type subsection_1 = pars.GET_subsection_1();
-                    if (subsection_1 == Parser::Type::PIN) { 
-                        Serial.print(OK_slash_equals);
-                        for (uint8_t i = 0; i < RELAY_MAX; ++i) {         // запрос состояний реле           
-                            Serial.print(i);
-                            Serial.print(slash);
-                            Serial.print(relay[i].GET_status_relay());
-                            Serial.print(slash);
-                        }
-                        Serial.println(slash_s);
-                    } else if (subsection_1 == Parser::Type::MOD) {       // запрос настроек реле (номер, режим)
-                        uint8_t rel = pars.GET_value(0);
-                        uint8_t mod = pars.GET_value(1);
-                        uint16_t min_on = relay[rel].GET_minut_on(mod);
-                        uint16_t min_off = relay[rel].GET_minut_off(mod);
-                        Serial.print(OK_slash_equals);
-                        Serial.print(relay[rel].GET_status_on(mod));
-                        Serial.print(slash);
-                        Serial.print(relay[rel].GET_status_off(mod));
-                        Serial.print(slash);
-                        Serial.println(relay[rel].GET_status_repeat(mod));
-                        Serial.print(slash);
-                        Serial.print(min_on / MINUTES_IN_HOUR);
-                        Serial.print(slash);
-                        Serial.print(min_on % MINUTES_IN_HOUR);
-                        Serial.print(slash);
-                        Serial.print(min_off / MINUTES_IN_HOUR);
-                        Serial.print(slash);
-                        Serial.print(min_off % MINUTES_IN_HOUR);
-                        Serial.println(slash_slash);
-                    }
-                }
-            } else if (type == Parser::Type::POST) {
-                Parser::Type chapter = pars.GET_chapter();
-                if (chapter == Parser::Type::TIME) {                       // установка времени
-                    uint8_t sec_p = pars.GET_value(0);
-                    uint8_t min_p = pars.GET_value(1);
-                    uint8_t hour_p = pars.GET_value(2);
-                    uint8_t day_p = pars.GET_value(3);
-                    uint8_t month_p = pars.GET_value(4);
-                    uint8_t year_p = pars.GET_value(5);
-                    rtc.setTime(sec_p, min_p, hour_p, day_p, month_p, year_p - 48);
-                    Serial.println(OK_slash_slash);
-                } else if (chapter == Parser::Type::RELAY) {
-                    Parser::Type subsection_1 = pars.GET_subsection_1();
-                    if (subsection_1 == Parser::Type::PIN) {              // включить-выключить
-                        uint8_t relay_p = pars.GET_value(0);
-                        if (pars.GET_value(1)) {
-                            relay[relay_p].SET_on_relay();
-                            Serial.println(OK_slash_slash);
-                        } else {
-                            relay[relay_p].SET_off_relay();
-                            Serial.println(OK_slash_slash);
-                        }
-                    } else if (subsection_1 == Parser::Type::MOD) {
-                        Parser::Type subsection_2 = pars.GET_subsection_2();
-                        if (subsection_2 == Parser::Type::ON) {              // режим включения
-                            uint8_t relay_p = pars.GET_value(0);
-                            uint8_t mod_p = pars.GET_value(1);
-                            uint8_t min_p = pars.GET_value(2);
-                            uint8_t hour_p = pars.GET_value(3);
-                            relay[relay_p].SET_minut_on(mod_p, hour_p * MINUTES_IN_HOUR + min_p);
-                            relay[relay_p].SET_on_on(mod_p);
-                            relay[relay_p].SET_on_off(mod_p);
-                            if (pars.GET_value(4)) {
-                                relay[relay_p].SET_on_repeat(mod_p);
-                                Serial.println(OK_slash_slash);
-                            } else {
-                                relay[relay_p].SET_off_repeat(mod_p);
-                                Serial.println(OK_slash_slash);
-                            }
-                            if (pars.GET_value(5)) {
-                                relay[relay_p].SET_on_relay();
-                                Serial.println(OK_slash_slash);
-                            }
-                        } else if (subsection_2 == Parser::Type::OFF) {      // режим выключения
-                            uint8_t relay_p = pars.GET_value(0);
-                            uint8_t mod_p = pars.GET_value(1);
-                            uint8_t min_p = pars.GET_value(2);
-                            uint8_t hour_p = pars.GET_value(3);
-                            relay[relay_p].SET_minut_off(mod_p, hour_p * MINUTES_IN_HOUR + min_p);
-                            relay[relay_p].SET_on_on(mod_p);
-                            relay[relay_p].SET_on_off(mod_p);
-                            if (pars.GET_value(4)) {
-                                relay[relay_p].SET_on_repeat(mod_p);
-                                Serial.println(OK_slash_slash);
-                            } else {
-                                relay[relay_p].SET_off_repeat(mod_p);
-                                Serial.println(OK_slash_slash);
-                            }
-                            if (pars.GET_value(5)) {
-                                relay[relay_p].SET_on_relay();
-                                Serial.println(OK_slash_slash);
-                            }
-                        } else if (subsection_2 == Parser::Type::REPIAT) {   // активация-деактивация повтора
-                            uint8_t relay_p = pars.GET_value(0);
-                            if (pars.GET_value(2)) {
-                                relay[relay_p].SET_on_repeat(pars.GET_value(1));
-                                Serial.println(OK_slash_slash);
-                            } else {
-                                relay[relay_p].SET_off_repeat(pars.GET_value(1));
-                                Serial.println(OK_slash_slash);
-                            }
-                        } else if (subsection_2 == Parser::Type::ACTIV) {    // активация-деактивация режима
-                            uint8_t relay_p = pars.GET_value(0);
-                            uint8_t mod_p = pars.GET_value(1);
-                            if (pars.GET_value(2)) {
-                                relay[relay_p].SET_on_on(mod_p);
-                                relay[relay_p].SET_on_off(mod_p);
-                                Serial.println(OK_slash_slash);
-                            } else {
-                                relay[relay_p].SET_off_on(mod_p);
-                                relay[relay_p].SET_off_off(mod_p);
-                                Serial.println(OK_slash_slash);
-                            }
-                        }
-                    }
-                }
-            } else if (type == Parser::Type::ERROR) {
-                Serial.println(ER3);
-            }
+    if (receiveBytesFromUART()) {
+        // обработка запроса
+        RequestFromServer rfs;
+        rfs.deserialize(dataIn, MAX_BUF);
+        if (rfs.GET_Type() == RequestType::PING) {
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::PIN_ON) {
+          smart_home.SET_on_relay(rfs.GET_relay());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::PIN_ON_MIN) {
+          smart_home.SET_minut_off(rfs.GET_relay(), rfs.GET_mod(), rfs.GET_min_off());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::PIN_OFF) {
+          smart_home.SET_off_relay(rfs.GET_relay());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::MOD_ON) {
+          smart_home.SET_on_mod(rfs.GET_relay(), rfs.GET_mod());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::MOD_OFF) {
+          smart_home.SET_off_mod(rfs.GET_relay(), rfs.GET_mod());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::MOD_T) {
+          smart_home.SET_minut_on(rfs.GET_relay(), rfs.GET_mod(),
+                                  rfs.GET_hour_on() * MINUTES_IN_HOUR + rfs.GET_min_on());
+          smart_home.SET_minut_off(rfs.GET_relay(), rfs.GET_mod(),
+                                  rfs.GET_hour_off() * MINUTES_IN_HOUR + rfs.GET_min_off());
+          SmartHome_UART();
+        } else if (rfs.GET_Type() == RequestType::TIME) {
+          rtc.setTime(0, rfs.GET_min_on(), rfs.GET_hour_on(), rfs.GET_day(),
+                      rfs.GET_month(), rfs.GET_year() + 2000);
+          smart_home.SET_time(rtc.getTime());
+          SmartHome_UART();
         }
-        
     }
-    date_time = rtc.getTime();
+    smart_home.SET_time(rtc.getTime());
     delay(10);
-    minutes = (uint16_t)date_time.hour * 60 + (uint16_t)date_time.minute;
-    for (uint8_t z = 0; z < RELAY_MAX; ++z) {
-        if (relay[z].Update(minutes)) {
-            EEPROM.put(z * sizeof(Relay), relay[z]);
-        }
-        //digitalWrite(relay[z].GET_pin(), relay[z].GET_status_relay());
-        digitalWriteFast(relay[z].GET_pin(), (bool)relay[z].GET_status_relay());
+    minutes = smart_home.GET_time().hour * 60 + smart_home.GET_time().minute;
+    if (smart_home.Update(minutes)) {
+      EEPROM.put(0, smart_home);
     }
+    for (uint8_t z = 0; z < 3; ++z) {
+      digitalWriteFast(smart_home.GET_pin(z), (bool)smart_home.GET_status_relay(z));
+    }
+}
+
+void SmartHome_UART() {
+  smart_home.serialize(dataOut, MAX_BUF);
+  Serial.write(dataOut, MAX_BUF);
 }
 
 void clearEEPROM() {
@@ -224,30 +111,16 @@ void clearEEPROM() {
     }
 }
 
-void ShowTime() {
-    Serial.print(OK_slash_equals);
-    Serial.print(date_time.second);
-    Serial.print(slash);
-    Serial.print(date_time.minute);
-    Serial.print(slash);
-    Serial.print(date_time.hour);
-    Serial.print(slash);
-    Serial.print(date_time.date);
-    Serial.print(slash);
-    Serial.print(date_time.month);
-    Serial.print(slash);
-    Serial.print(date_time.year);
-    Serial.println(slash_slash);
-}
-
-bool ReadingBuffer() {
-    if (Serial.available()) {
-        uint8_t amount = Serial.readBytesUntil(';', dataArray, MAX_BUF);
-        dataArray[amount] = '\0';
-        return true;
-    } else {
-        return false;
+bool receiveBytesFromUART() {
+  if (Serial.available() > 0) {
+    byteCount = 0;  // Сбросьте счетчик перед началом чтения
+    while (Serial.available() > 0 && byteCount < MAX_BUF) {
+      int bytesRead = Serial.readBytes(dataIn + byteCount, MAX_BUF - byteCount);
+      byteCount += bytesRead;
     }
+    return byteCount > 0;  // Вернуть true, если данные были прочитаны
+  }
+  return false;
 }
 
 void pinModeFast(uint8_t pin, uint8_t mode) {
