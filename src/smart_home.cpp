@@ -159,7 +159,7 @@ void SmartHome::SET_minut_off(uint8_t relay, uint8_t mod, uint16_t min) {
     if (relay == 1) {
         SET_off_mod(relay, mod);
         SET_on_relay(relay);
-        minute_off_relay_1 += min;
+        minute_off_relay_1 = min;
         flag |= BIT_7;  // Изменения в классе
     }
     else if (relay == 2 && mod == 0) {

@@ -65,7 +65,8 @@ void loop() {
           smart_home.SET_on_relay(rfs.GET_relay());
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_ON_MIN) {
-          smart_home.SET_minut_off(rfs.GET_relay(), rfs.GET_mod(), rfs.GET_min_off());
+          smart_home.SET_minut_off(rfs.GET_relay(), rfs.GET_mod(),
+                                   rfs.GET_hour_off() * MINUTES_IN_HOUR + rfs.GET_min_off());
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_OFF) {
           smart_home.SET_off_relay(rfs.GET_relay());
