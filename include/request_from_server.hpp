@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 enum class RequestType {PING, PIN_ON, PIN_ON_MIN, PIN_OFF,
-                        MOD_ON, MOD_OFF, MOD_T, TIME};
+                        MOD_ON, MOD_OFF, MOD_T, TIME, NO};
 
 class RequestFromServer {
     private:
@@ -19,7 +19,7 @@ class RequestFromServer {
         uint8_t year;
     public:
         RequestFromServer() {}
-        RequestType GET_Type() const {return RequestType(flag);}
+        RequestType GET_Type() const;
         uint8_t GET_relay() const {return relay;}
         uint8_t GET_mod() const {return mod;}
         uint8_t GET_min_on() const {return min_on;}

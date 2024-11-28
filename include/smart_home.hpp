@@ -61,7 +61,7 @@ class SmartHome {
         // Деактивация мод
         void SET_off_mod(uint8_t relay, uint8_t mod);
         // Запрос пина
-        char GET_pin(uint8_t relay) const;
+        uint8_t GET_pin(uint8_t relay) const;
         // Запрос времени <on>
         uint16_t GET_minut_on(uint8_t relay, uint8_t mod) const;
         // Запрос времени <off>

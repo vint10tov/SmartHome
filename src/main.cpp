@@ -50,15 +50,15 @@ void setup() {
     for (uint8_t i = 0; i < 3; ++i) {
         uint8_t pin = smart_home.GET_pin(i);
         pinModeFast(pin, 1);
-        digitalWriteFast(pin, (bool)smart_home.GET_status_relay(i));
+        digitalWriteFast(pin, smart_home.GET_status_relay(i));
     }
 }
 
 void loop() {
     if (receiveBytesFromUART()) {
-        // обработка запроса
-        RequestFromServer rfs;
-        rfs.deserialize(dataIn, MAX_BUF);
+      // обработка запроса
+      RequestFromServer rfs;
+      if (rfs.deserialize(dataIn, MAX_BUF)) {
         if (rfs.GET_Type() == RequestType::PING) {
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_ON) {
@@ -66,7 +66,7 @@ void loop() {
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_ON_MIN) {
           smart_home.SET_minut_off(rfs.GET_relay(), rfs.GET_mod(),
-                                   rfs.GET_hour_off() * MINUTES_IN_HOUR + rfs.GET_min_off());
+                                    rfs.GET_hour_off() * MINUTES_IN_HOUR + rfs.GET_min_off());
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_OFF) {
           smart_home.SET_off_relay(rfs.GET_relay());
@@ -89,6 +89,7 @@ void loop() {
           smart_home.SET_time(rtc.getTime());
           SmartHome_UART();
         }
+      }
     }
     smart_home.SET_time(rtc.getTime());
     delay(10);
@@ -97,7 +98,7 @@ void loop() {
       EEPROM.put(0, smart_home);
     }
     for (uint8_t z = 0; z < 3; ++z) {
-      digitalWriteFast(smart_home.GET_pin(z), (bool)smart_home.GET_status_relay(z));
+      digitalWriteFast(smart_home.GET_pin(z), smart_home.GET_status_relay(z));
     }
 }
 

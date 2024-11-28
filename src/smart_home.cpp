@@ -104,7 +104,7 @@ void SmartHome::SET_off_mod(uint8_t relay, uint8_t mod) {
 }
 
 // Запрос пина
-char SmartHome::GET_pin(uint8_t relay) const {
+uint8_t SmartHome::GET_pin(uint8_t relay) const {
     if (relay == 0)
         return relay_0;
     else if (relay == 1)
@@ -157,7 +157,7 @@ void SmartHome::SET_minut_on(uint8_t relay, uint8_t mod, uint16_t min) {
 // Установка времени <off>
 void SmartHome::SET_minut_off(uint8_t relay, uint8_t mod, uint16_t min) {
     if (relay == 1) {
-        SET_off_mod(relay, mod);
+        SET_on_mod(relay, mod);
         SET_on_relay(relay);
         minute_off_relay_1 = min;
         flag |= BIT_7;  // Изменения в классе
@@ -193,7 +193,7 @@ bool SmartHome::Update(uint16_t & current_time) {
         }
     }
     bool ch = GET_status_changes();
-    flag &= ~BIT_6; // изменений больше нет
+    flag &= ~BIT_7; // изменений больше нет
     return ch;
 }
 
