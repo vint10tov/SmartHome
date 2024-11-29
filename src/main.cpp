@@ -44,8 +44,8 @@ void setup() {
     delay(10);
     minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
 
-    //EEPROM.put(sizeof(smart_home), smart_home); //
-    EEPROM.get(sizeof(smart_home), smart_home); //
+    //EEPROM.put(20, smart_home); //
+    EEPROM.get(20, smart_home); //
     
     for (uint8_t i = 0; i < 3; ++i) {
       pinModeFast(smart_home.GET_pin(i), OUTPUT);
@@ -94,7 +94,7 @@ void loop() {
     delay(10);
     minutes = smart_home.GET_time().hour * 60 + smart_home.GET_time().minute;
     if (smart_home.Update(minutes)) {
-      EEPROM.put(0, smart_home);
+      EEPROM.put(20, smart_home);
     }
     for (uint8_t z = 0; z < 3; ++z) {
       digitalWriteFast(smart_home.GET_pin(z), smart_home.GET_status_relay(z));
@@ -104,6 +104,7 @@ void loop() {
 void SmartHome_UART() {
   smart_home.serialize(dataOut, MAX_BUF);
   Serial.write(dataOut, MAX_BUF);
+  delay(100);
 }
 
 void clearEEPROM() {
