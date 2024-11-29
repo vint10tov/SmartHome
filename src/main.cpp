@@ -28,14 +28,14 @@ void setup() {
     
     Serial.begin(9600);
 
-    // clearEEPROM(); // Затираем EEPROM перед началом работы
+    //clearEEPROM(); // Затираем EEPROM перед началом работы
 
     if (!rtc.begin()) {
         delay(60000);
         asm volatile("jmp 0x00");
     }
 
-    //rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
+    // rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
     if (rtc.lostPower()) {            // выполнится при сбросе батарейки
         rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
     }
@@ -44,13 +44,12 @@ void setup() {
     delay(10);
     minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
 
-    //EEPROM.put(0, smart_home); //
-    EEPROM.get(0, smart_home); //
+    //EEPROM.put(sizeof(smart_home), smart_home); //
+    EEPROM.get(sizeof(smart_home), smart_home); //
     
     for (uint8_t i = 0; i < 3; ++i) {
-        uint8_t pin = smart_home.GET_pin(i);
-        pinModeFast(pin, 1);
-        digitalWriteFast(pin, smart_home.GET_status_relay(i));
+      pinModeFast(smart_home.GET_pin(i), OUTPUT);
+      digitalWriteFast(smart_home.GET_pin(i), smart_home.GET_status_relay(i));
     }
 }
 
