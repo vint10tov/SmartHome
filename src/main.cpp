@@ -5,14 +5,21 @@
 #include "smart_home.hpp"
 #include "request_from_server.hpp"
 
+const int ledPin = 13; // Номер пина, к которому подключен светодиод
+const long interval = 500; // Интервал мигания в миллисекундах
+bool ledState = false; // Состояние светодиода
+unsigned long previousMillis = 0; // Время последнего мигания
+int blinkCount = 10; // Количество миганий
+int currentBlink = 0; // Текущий счетчик миганий
+
 const uint8_t RELAY_0 = 6;
 const uint8_t RELAY_1 = 7;
 const uint8_t RELAY_2 = 8;
 const uint8_t MINUTES_IN_HOUR = 60;
-const uint8_t MAX_BUF    = 20;      // Максимальная длина массива
-uint8_t dataIn[MAX_BUF]  = {0};     // Объявляем массив для хранения данных запроса
-uint8_t dataOut[MAX_BUF] = {0};     // Объявляем массив для хранения данных ответа
-uint8_t byteCount = 0;              // Счетчик принятого байта
+const uint8_t MAX_BUF_in      = 11;      // Максимальная длина входного массива
+const uint8_t MAX_BUF_out     = 21;      // Максимальная длина выходного массива
+uint8_t dataIn[MAX_BUF_in]    = {0};     // Объявляем массив для хранения данных запроса
+uint8_t dataOut[MAX_BUF_out]  = {0};     // Объявляем массив для хранения данных ответа
 
 MicroDS3231 rtc;
 SmartHome smart_home(RELAY_0, RELAY_1, RELAY_2);
@@ -23,41 +30,43 @@ bool receiveBytesFromUART();
 void pinModeFast(uint8_t pin, uint8_t mode);
 void digitalWriteFast(uint8_t pin, bool x);
 void SmartHome_UART();
+uint8_t calculate_checksum(const uint8_t *data, uint8_t size);
+bool verify_checksum(const uint8_t *data, uint8_t size);
+void blinkError();
 
 void setup() {
-    
-    Serial.begin(9600);
+  Serial.begin(9600);
 
-    //clearEEPROM(); // Затираем EEPROM перед началом работы
+  //clearEEPROM(); // Затираем EEPROM перед началом работы
 
-    if (!rtc.begin()) {
-        delay(60000);
-        asm volatile("jmp 0x00");
-    }
+  if (!rtc.begin()) {
+      delay(60000);
+      asm volatile("jmp 0x00");
+  }
 
-    // rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
-    if (rtc.lostPower()) {            // выполнится при сбросе батарейки
-        rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
-    }
+  // rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
+  if (rtc.lostPower()) {            // выполнится при сбросе батарейки
+      rtc.setTime(BUILD_SEC, BUILD_MIN, BUILD_HOUR, BUILD_DAY, BUILD_MONTH, BUILD_YEAR);
+  }
 
-    smart_home.SET_time(rtc.getTime());
-    delay(10);
-    minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
+  //EEPROM.put(20, smart_home); //
+  EEPROM.get(20, smart_home); //
 
-    //EEPROM.put(20, smart_home); //
-    EEPROM.get(20, smart_home); //
-    
-    for (uint8_t i = 0; i < 3; ++i) {
-      pinModeFast(smart_home.GET_pin(i), OUTPUT);
-      digitalWriteFast(smart_home.GET_pin(i), smart_home.GET_status_relay(i));
-    }
+  smart_home.SET_time(rtc.getTime());
+  delay(10);
+  minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
+  
+  for (uint8_t i = 0; i < 3; ++i) {
+    pinModeFast(smart_home.GET_pin(i), OUTPUT);
+    digitalWriteFast(smart_home.GET_pin(i), smart_home.GET_status_relay(i));
+  }
 }
 
 void loop() {
     if (receiveBytesFromUART()) {
       // обработка запроса
       RequestFromServer rfs;
-      if (rfs.deserialize(dataIn, MAX_BUF)) {
+      if (rfs.deserialize(dataIn, MAX_BUF_in - 1)) {
         if (rfs.GET_Type() == RequestType::PING) {
           SmartHome_UART();
         } else if (rfs.GET_Type() == RequestType::PIN_ON) {
@@ -102,9 +111,9 @@ void loop() {
 }
 
 void SmartHome_UART() {
-  smart_home.serialize(dataOut, MAX_BUF);
-  Serial.write(dataOut, MAX_BUF);
-  delay(100);
+  smart_home.serialize(dataOut, MAX_BUF_out - 1);
+  dataOut[MAX_BUF_out - 1] = calculate_checksum(dataOut, MAX_BUF_out - 1);
+  Serial.write(dataOut, MAX_BUF_out); // Отправляем данные
 }
 
 void clearEEPROM() {
@@ -113,16 +122,24 @@ void clearEEPROM() {
     }
 }
 
-bool receiveBytesFromUART() {
+bool receiveBytesFromUART() { // получение данных
+  uint8_t byteCount = 0;
+
   if (Serial.available() > 0) {
-    byteCount = 0;  // Сбросьте счетчик перед началом чтения
-    while (Serial.available() > 0 && byteCount < MAX_BUF) {
-      int bytesRead = Serial.readBytes(dataIn + byteCount, MAX_BUF - byteCount);
+    while (byteCount < MAX_BUF_in && Serial.available() > 0) {
+      int bytesRead = Serial.readBytes(dataIn + byteCount, MAX_BUF_in - byteCount);
       byteCount += bytesRead;
     }
-    return byteCount > 0;  // Вернуть true, если данные были прочитаны
+
+    if (byteCount == MAX_BUF_in) {
+      if (verify_checksum(dataIn, MAX_BUF_in)) {
+        return true; // Успешно получили и проверили данные
+      } else {
+        blinkError();
+      }
+    }
   }
-  return false;
+  return false; // Ошибка
 }
 
 void pinModeFast(uint8_t pin, uint8_t mode) {
@@ -189,4 +206,44 @@ void digitalWriteFast(uint8_t pin, bool x) {
   } else if (pin < 20) {
     bitWrite(PORTC, (pin - 14), x);    // Set pin to HIGH / LOW 
   }
+}
+
+uint8_t calculate_checksum(const uint8_t *data, uint8_t size) {
+    uint8_t checksum = 0;
+    for (size_t i = 0; i < size; ++i) {
+        checksum ^= data[i]; // Используем XOR для контроля
+    }
+    return checksum;
+}
+
+bool verify_checksum(const uint8_t *data, uint8_t size) {
+    if (size < 1) return false; // Если данных недостаточно, контрольная сумма недоступна
+    uint8_t received_checksum = data[size - 1]; // Предполагаем, что последний байт — это контрольная сумма
+    return received_checksum == calculate_checksum(data, size - 1);
+}
+
+// Функция для мигания светодиода
+void blinkError() {
+  currentBlink = 0; // Сбрасываем счетчик миганий
+  unsigned long currentMillis;
+
+  // Цикл мигания (воспользуемся millis для ненадо блокирующих задержек)
+  while (currentBlink < blinkCount) {
+    currentMillis = millis();
+
+    // Проверяем, пришло ли время для мигания
+    if (currentMillis - previousMillis >= interval) {
+      previousMillis = currentMillis; // Сохраняем текущее время
+      ledState = !ledState; // Изменяем состояние светодиода
+      digitalWrite(ledPin, ledState ? HIGH : LOW); // Включаем или выключаем светодиод
+      
+      // Увеличиваем счетчик миганий, когда светодиод был выключен (эквивалент обновления)
+      if (ledState == LOW) {
+        currentBlink++;
+      }
+    }
+  }
+
+  // После завершения мигания, гарантировать, что светодиод выключен
+  digitalWrite(ledPin, LOW);
 }
