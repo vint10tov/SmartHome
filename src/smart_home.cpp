@@ -179,13 +179,15 @@ bool SmartHome::Update(uint16_t & current_time) {
     if (GET_status_mod(1, 0) && minute_off_relay_1 == current_time) {
         SET_off_relay(1);
         SET_off_mod(1, 0);
-    } else if (GET_status_mod(2, 0)) {
+    }
+    if (GET_status_mod(2, 0)) {
         if (minute_on_relay_2_mod_0 == current_time) {
             SET_on_relay(2);
         } else if (minute_off_relay_2_mod_0 == current_time) {
             SET_off_relay(2);
         }
-    } else if (GET_status_mod(2, 1)) {
+    }
+    if (GET_status_mod(2, 1)) {
         if (minute_on_relay_2_mod_1 == current_time) {
             SET_on_relay(2);
         } else if (minute_off_relay_2_mod_1 == current_time) {
