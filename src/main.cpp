@@ -1,26 +1,22 @@
 #include <Arduino.h>
 #include <microDS3231.h> //https://github.com/GyverLibs/microDS3231?tab=readme-ov-file#usage
 #include <EEPROM.h>
+//#include <SoftwareSerial.h>
 #include <Wire.h>
 #include "smart_home.hpp"
 #include "request_from_server.hpp"
 
-const int ledPin = 13; // Номер пина, к которому подключен светодиод
-const long interval = 500; // Интервал мигания в миллисекундах
-bool ledState = false; // Состояние светодиода
-unsigned long previousMillis = 0; // Время последнего мигания
-int blinkCount = 10; // Количество миганий
-int currentBlink = 0; // Текущий счетчик миганий
-
-const uint8_t RELAY_0 = 6;
-const uint8_t RELAY_1 = 7;
-const uint8_t RELAY_2 = 8;
+const uint8_t PIN_DIR         = 2;  // Пин для переключения режима RS485
+const uint8_t RELAY_0         = 6;
+const uint8_t RELAY_1         = 7;
+const uint8_t RELAY_2         = 8;
 const uint8_t MINUTES_IN_HOUR = 60;
-const uint8_t MAX_BUF_in      = 11;      // Максимальная длина входного массива
-const uint8_t MAX_BUF_out     = 21;      // Максимальная длина выходного массива
-uint8_t dataIn[MAX_BUF_in]    = {0};     // Объявляем массив для хранения данных запроса
-uint8_t dataOut[MAX_BUF_out]  = {0};     // Объявляем массив для хранения данных ответа
+const uint8_t MAX_BUF_in      = 11;  // Максимальная длина входного массива
+const uint8_t MAX_BUF_out     = 21;  // Максимальная длина выходного массива
+uint8_t dataIn[MAX_BUF_in]    = {0}; // Объявляем массив для хранения данных запроса
+uint8_t dataOut[MAX_BUF_out]  = {0}; // Объявляем массив для хранения данных ответа
 
+//SoftwareSerial RS485Serial(3, 2); // RX, TX
 MicroDS3231 rtc;
 SmartHome smart_home(RELAY_0, RELAY_1, RELAY_2);
 uint16_t minutes;
@@ -32,10 +28,10 @@ void digitalWriteFast(uint8_t pin, bool x);
 void SmartHome_UART();
 uint8_t calculate_checksum(const uint8_t *data, uint8_t size);
 bool verify_checksum(const uint8_t *data, uint8_t size);
-void blinkError();
 
 void setup() {
   Serial.begin(9600);
+  //RS485Serial.begin(115200);
 
   //clearEEPROM(); // Затираем EEPROM перед началом работы
 
@@ -55,6 +51,13 @@ void setup() {
   smart_home.SET_time(rtc.getTime());
   delay(10);
   minutes = smart_home.GET_time().hour * MINUTES_IN_HOUR + smart_home.GET_time().minute;
+
+  pinModeFast(13, OUTPUT);
+  digitalWriteFast(13, LOW);
+
+  pinModeFast(PIN_DIR, OUTPUT);
+  // в режим получения данных
+  digitalWriteFast(PIN_DIR, LOW);
   
   for (uint8_t i = 0; i < 3; ++i) {
     pinModeFast(smart_home.GET_pin(i), OUTPUT);
@@ -99,6 +102,7 @@ void loop() {
         }
       }
     }
+
     smart_home.SET_time(rtc.getTime());
     delay(10);
     minutes = smart_home.GET_time().hour * 60 + smart_home.GET_time().minute;
@@ -111,9 +115,14 @@ void loop() {
 }
 
 void SmartHome_UART() {
-  smart_home.serialize(dataOut, MAX_BUF_out - 1);
-  dataOut[MAX_BUF_out - 1] = calculate_checksum(dataOut, MAX_BUF_out - 1);
+  smart_home.serialize(dataOut, MAX_BUF_out - static_cast<uint8_t>(1));
+  dataOut[MAX_BUF_out - static_cast<uint8_t>(1)] = calculate_checksum(dataOut, MAX_BUF_out - static_cast<uint8_t>(1));
+  digitalWriteFast(PIN_DIR,  HIGH);
   Serial.write(dataOut, MAX_BUF_out); // Отправляем данные
+  delay(30);
+  digitalWriteFast(13,  LOW);
+  digitalWriteFast(PIN_DIR,  LOW);
+  delay(10);
 }
 
 void clearEEPROM() {
@@ -124,22 +133,21 @@ void clearEEPROM() {
 
 bool receiveBytesFromUART() { // получение данных
   uint8_t byteCount = 0;
-
+ 
   if (Serial.available() > 0) {
+    delay(10);
     while (byteCount < MAX_BUF_in && Serial.available() > 0) {
       int bytesRead = Serial.readBytes(dataIn + byteCount, MAX_BUF_in - byteCount);
       byteCount += bytesRead;
     }
-
     if (byteCount == MAX_BUF_in) {
       if (verify_checksum(dataIn, MAX_BUF_in)) {
+        digitalWriteFast(13, HIGH);
         return true; // Успешно получили и проверили данные
-      } else {
-        blinkError();
       }
     }
   }
-  return false; // Ошибка
+  return false;
 }
 
 void pinModeFast(uint8_t pin, uint8_t mode) {
@@ -210,7 +218,7 @@ void digitalWriteFast(uint8_t pin, bool x) {
 
 uint8_t calculate_checksum(const uint8_t *data, uint8_t size) {
     uint8_t checksum = 0;
-    for (size_t i = 0; i < size; ++i) {
+    for (uint8_t i = 0; i < size; ++i) {
         checksum ^= data[i]; // Используем XOR для контроля
     }
     return checksum;
@@ -220,30 +228,4 @@ bool verify_checksum(const uint8_t *data, uint8_t size) {
     if (size < 1) return false; // Если данных недостаточно, контрольная сумма недоступна
     uint8_t received_checksum = data[size - 1]; // Предполагаем, что последний байт — это контрольная сумма
     return received_checksum == calculate_checksum(data, size - 1);
-}
-
-// Функция для мигания светодиода
-void blinkError() {
-  currentBlink = 0; // Сбрасываем счетчик миганий
-  unsigned long currentMillis;
-
-  // Цикл мигания (воспользуемся millis для ненадо блокирующих задержек)
-  while (currentBlink < blinkCount) {
-    currentMillis = millis();
-
-    // Проверяем, пришло ли время для мигания
-    if (currentMillis - previousMillis >= interval) {
-      previousMillis = currentMillis; // Сохраняем текущее время
-      ledState = !ledState; // Изменяем состояние светодиода
-      digitalWrite(ledPin, ledState ? HIGH : LOW); // Включаем или выключаем светодиод
-      
-      // Увеличиваем счетчик миганий, когда светодиод был выключен (эквивалент обновления)
-      if (ledState == LOW) {
-        currentBlink++;
-      }
-    }
-  }
-
-  // После завершения мигания, гарантировать, что светодиод выключен
-  digitalWrite(ledPin, LOW);
 }
